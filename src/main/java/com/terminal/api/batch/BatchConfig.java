@@ -10,8 +10,6 @@ import java.util.concurrent.ThreadLocalRandom;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.Step;
 import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
-import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
-import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
 import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.launch.support.RunIdIncrementer;
 import org.springframework.batch.core.repository.JobRepository;
@@ -30,8 +28,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.batch.item.database.JdbcCursorItemReader;
 import org.springframework.batch.item.database.builder.JdbcCursorItemReaderBuilder;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
+
 import org.springframework.jdbc.core.BeanPropertyRowMapper;
 import javax.sql.DataSource;
 
@@ -49,13 +46,17 @@ public class BatchConfig {
     }
 
     @Bean
-    public JdbcCursorItemReader<MyEntity> itemReader(DataSource dataSource) {
+    public JdbcCursorItemReader<EntryDispatchEntity> itemReader(DataSource dataSource) {
     	System.out.println(" * itemReader:::");
-        return new JdbcCursorItemReaderBuilder<MyEntity>()
+        return new JdbcCursorItemReaderBuilder<EntryDispatchEntity>()
                 .dataSource(dataSource)
                 .name("jdbcCursorItemReader")
-                .sql("SELECT id, name, description FROM my_table")
-                .rowMapper(new BeanPropertyRowMapper<>(MyEntity.class))
+                .sql("  SELECT my.id, my.name, my.description FROM  my_table my"
+                		+ "   WHERE NOT EXISTS ("
+                		+ "   SELECT 1"
+                		+ "   FROM batch_job_execution_params pa"
+                		+ "   WHERE my.id = CAST(pa.parameter_value AS BIGINT) and pa.parameter_name ='id') ")
+                .rowMapper(new BeanPropertyRowMapper<>(EntryDispatchEntity.class))
                 .build();
     }
 
@@ -63,7 +64,7 @@ public class BatchConfig {
     public Step myStep() {
     	System.out.println(" * myStep:::");
         return new StepBuilder("myStep", jobRepository)
-                .<MyEntity, MyEntity>chunk(10, transactionManager)
+                .<EntryDispatchEntity, EntryDispatchEntity>chunk(10, transactionManager)
                 .reader(itemReader(null)) // Asegúrate de que DataSource esté configurado correctamente
                 .processor(itemProcessor())
                 .writer(itemWriter())
@@ -71,23 +72,26 @@ public class BatchConfig {
     }
 
     @Bean
-    public Job myJob() {
+    public Job myJob(DispatchJobExecutionListener listener) {
     	System.out.println(" * myJob:::");
-        return new JobBuilder("myJob", jobRepository)
+        return new JobBuilder("myJob", jobRepository)        		
                 .start(myStep())
+                .listener(listener)
                 .build();
     }
 
     @Bean
-    public ItemProcessor<MyEntity, MyEntity> itemProcessor() {
-    	System.out.println("Procesando:::");
-        return new MyItemProcessor();
+    public ItemProcessor<EntryDispatchEntity, EntryDispatchEntity> itemProcessor() {
+    	System.out.println("ItemProcessor:::");
+        return new DispatchItemProcessor();
     }
 
     @Bean
-    public ItemWriter<MyEntity> itemWriter() {
-        return new MyItemWriter();
+    public ItemWriter<EntryDispatchEntity> itemWriter() {
+    	System.out.println("ItemWriter:::");
+        return new DispatchItemWriter();
     }
+    
     
     
 /*
